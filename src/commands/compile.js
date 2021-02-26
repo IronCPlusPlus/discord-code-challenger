@@ -35,6 +35,7 @@ export default class CompileCommand extends CompilerCommand {
 		}
 		
         let lang = args[0].toLowerCase();
+        if (lang == 'cpp') lang = 'c++'; // Save everyone the head-ache.
         args.shift();
 
         if (!this.client.wandbox.isValidCompiler(lang) && !this.client.wandbox.has(lang)) {
@@ -45,6 +46,7 @@ export default class CompileCommand extends CompilerCommand {
         let parser = new CompilationParser(msg);
 
         const argsData = parser.parseArguments();
+        console.log(argsData);
         let code = null;
         // URL request needed to retrieve code
         if (argsData.fileInput.length > 0) {

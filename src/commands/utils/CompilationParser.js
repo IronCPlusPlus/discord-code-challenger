@@ -22,7 +22,7 @@ export default class CompilationParser {
          */
         this.client = message.message.client;
     }
-
+    
     /**
      * Figure out the args passed, it should go in the following order:
      * compile <language> < http://online.file/url | pipe data here

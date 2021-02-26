@@ -41,12 +41,8 @@ export default class BotInfoCommand extends CompilerCommand {
             .setTitle('Current Bot Info:')
 
             .setDescription("Discord Compiler Bot\n"
-                + "Developed by Headline#9999 (Michael Flaherty)\n"
-                + "==============================\n"
-                + "[Invitation link](" + invitelink + ")"
-                + "\n[Vote for us!](" + votelink + ")"
-                + "\n[GitHub Repository](" + githublink + ")"
-                + "\n[Statistics Tracker](" + statslink + ")"
+                + "Compile Bot by Headline#9999 (Michael Flaherty)\n"
+                + "Prog-Racer by xrayhunter#9461\n"
                 + "\n==============================\n")
 
             .setColor(0x00FF00)

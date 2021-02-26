@@ -6,6 +6,7 @@ import { Wandbox } from './utils/apis/Wandbox'
 import { StatisticsAPI } from './utils/apis/StatisticsTracking'
 import { Godbolt } from './utils/apis/Godbolt'
 import { CompilationFixer } from './utils/CompilationFixer'
+import { ChallengeCatalog } from './utils/apis/CatalogChallenges'
 
 /**
  * discord.js client with added utility for general bot operations
@@ -43,6 +44,18 @@ export default class CompilerClient extends Client {
      * @type {Wandbox}
      */
     this.wandbox = new Wandbox(this);
+
+    /**
+     * Setup compilers cache
+     * @type {Wandbox}
+     */
+    this.wandbox = new Wandbox(this);
+
+    /**
+     * Setup godbolt cache
+     * @type {Godbolt}
+     */
+    this.challengeCatalog = new ChallengeCatalog(this);
 
     /**
      * Setup godbolt cache
@@ -134,6 +147,19 @@ export default class CompilerClient extends Client {
        * @type {Error}
        */
       this.emit('wandboxFailure', error);
+    }
+
+    try {
+      await this.challengeCatalog.initialize();
+    }
+    catch (error) {
+      /**
+       * Event that's called when godbolt is unable to initialize
+       * 
+       * @event CompilerClient#godboltFailure
+       * @type {Error}
+       */
+      this.emit('challengeCatalogFailure', error);
     }
 
     try {
