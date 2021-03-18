@@ -58,20 +58,8 @@ export default class ChallengeCommand extends CompilerCommand {
             }
             
             await msg.message.delete();
-
-            const embed = new MessageEmbed()
-                .setTitle('Finding Coding Challenge')
-                .setDescription(`*Searching Catalogs*`)
-                .setColor(0x444444)
-                .setThumbnail('https://imgur.com/TNzxfMB.png')
-                .setFooter(`Requested by: ${msg.message.author.tag}`)
-            const compiledMessage = await msg.dispatch('', embed);
-            
-            await sleep(500); // Maybe remove this?
     
-            await this.LoadRandomQuestion(msg, compiledMessage, level, lang);
-    
-            return compiledMessage;
+            return await this.LoadRandomQuestion(msg, undefined, level, lang);
         }
         catch (err)
         {
@@ -80,13 +68,35 @@ export default class ChallengeCommand extends CompilerCommand {
         }
     }
 
-    async LoadRandomQuestion(msg, previousMessage, level, lang)
+    async LoadRandomQuestion(msg, previousMessage, level, lang, tries)
     {
+        if (tries == undefined)
+            tries = 0;
+
+        if (previousMessage == undefined)
+        {
+            const embed = new MessageEmbed()
+                    .setTitle('Finding Coding Challenge')
+                    .setDescription(`*Searching Catalogs*`)
+                    .setColor(0x444444)
+                    .setThumbnail('https://imgur.com/TNzxfMB.png')
+                    .setFooter(`Requested by: ${msg.message.author.tag}`)
+            previousMessage = await msg.dispatch('', embed);
+            
+            await sleep(500); // Maybe remove this?
+        }
+
         if (level == undefined)
             level = Math.round(Math.random() * (this.client.challengeCatalog.keyArray().length - 1));
         
         var randomChallenge = this.client.challengeCatalog.getRandom(level, lang);
-
+        if (msg.lastQuestion == randomChallenge.name && tries <= 3)
+        {
+            tries++;
+            return await this.LoadRandomQuestion(msg, previousMessage, level, lang, tries);
+        }
+        
+        msg.lastQuestion = randomChallenge.name;
         return await this.LoadQuestion(randomChallenge, msg, previousMessage, level, lang);
     }
 
@@ -94,7 +104,7 @@ export default class ChallengeCommand extends CompilerCommand {
     {
         if (randomChallenge == undefined)
         {
-            if (previousMessage)
+            if (previousMessage && !previousMessage.deleted)
             {
                 await previousMessage.delete();
             }
@@ -106,7 +116,7 @@ export default class ChallengeCommand extends CompilerCommand {
             decodedDescription = randomChallenge.description['*']
         if (decodedDescription == undefined)
         {
-            if (previousMessage)
+            if (previousMessage && !previousMessage.deleted)
             {
                 await previousMessage.delete();
             }
@@ -169,19 +179,23 @@ export default class ChallengeCommand extends CompilerCommand {
 
         var hintsLeft = hints == undefined ? 0 : hints.length;
 
-        async function setupReactions()
+        async function setupReactions(self)
         {
             if (hintsLeft > 0)
             {
                 await previousMessage.react('❓');
             }
             await previousMessage.react('❌');
+            await previousMessage.react('▶');
+
+            // We want this to run in parallel of another await.
             previousMessage.awaitReactions(reaction_filter, { max: 1, time: 1000 * expirationTimeSecs, errors: ['time'] })
             .then(async collected => {
                 const reaction = collected.first();
-    
+
                 if (reaction.emoji.name === '❓') 
                 {
+                    // Todo :: Change to modern reply.
                     var tmpHintMsg = await previousMessage.reply(hints[hintsLeft - 1]);
                     hintMessages.push(tmpHintMsg);
                     
@@ -192,32 +206,41 @@ export default class ChallengeCommand extends CompilerCommand {
                     
                     // Update
                     await setupReactions();
-    
-                } else if (reaction.emoji.name === '❌') {
+                } 
+                else if (reaction.emoji.name === '❌') 
+                {
                     for (let index = 0; index < hintMessages.length; index++) {
                         const hintMsg = hintMessages[index];
-                        hintMsg.delete();
+                        if (!hintMsg.deleted)
+                            hintMsg.delete();
                     }
-                    await previousMessage.delete();
+                    if (previousMessage && !previousMessage.deleted)
+                        await previousMessage.delete();
+                } 
+                else if (reaction.emoji.name === '▶') 
+                {
+                    if (previousMessage && !previousMessage.deleted)
+                        await previousMessage.delete();
+                    await self.LoadRandomQuestion(msg, undefined, level, lang);
                 }
             })
-            .catch(collected => {
-                previousMessage.reactions.removeAll().catch(error => console.error('Failed to clear reactions: ', error));
-            });
+            .catch(err => console.error("Unexpected error at awaiting Reactions from Questionaire:", err))
         }
-        await setupReactions();
+        await setupReactions(this);
 
         const code_filter = m => m.author.id === msg.message.author.id;
         var userAnswerMsgs = undefined;
         try
         {
-            userAnswerMsgs = await previousMessage.channel.awaitMessages(code_filter, { max: 1, time: 1000 * expirationTimeSecs, errors: ['time', 'dispose'] });
+            userAnswerMsgs = await previousMessage.channel.awaitMessages(code_filter, { max: 1, time: 1000 * expirationTimeSecs, errors: ['time'] });
         }
         catch (err)
         {
+            log.error("Unexpected Error at awaiting user Answer Msg:", err);
             if (previousMessage.deleted)
             {
-                return;
+                console.error("Attempted to interact with something deleted!");
+                return null;
             }
 
             previousMessage.reactions.removeAll().catch(error => console.error('Failed to clear reactions: ', error));
@@ -226,7 +249,8 @@ export default class ChallengeCommand extends CompilerCommand {
 
         if (previousMessage.deleted)
         {
-            return;
+            console.error("Attempted to interact with something deleted!");
+            return null;
         }
         
         const userAnswerMsg = userAnswerMsgs.first();
@@ -295,7 +319,7 @@ export default class ChallengeCommand extends CompilerCommand {
                 reactionSuccess = true;
             }
             catch (e) {
-                msg.replyFail(`Failed to react to message, am I missing permissions?\n${e}`);
+                return await msg.replyFail(`Failed to react to message, am I missing permissions?\n${e}`);
             }    
         }
 
@@ -304,21 +328,19 @@ export default class ChallengeCommand extends CompilerCommand {
             json = await setup.compile();
         }
         catch (e) {
-            msg.replyFail(`Wandbox request failure \n ${e.message} \nPlease try again later`);
-            return;
+            return await msg.replyFail(`Wandbox request failure \n ${e.message} \nPlease try again later`);
         }
         if (!json) {
-            msg.replyFail(`Invalid Wandbox response \nPlease try again later`);
-            return;
+            
+            return await msg.replyFail(`Invalid Wandbox response \nPlease try again later`);
         }
-
         //remove our react
         if (reactionSuccess && this.client.loading_emote) {
             try {
                 await msg.message.reactions.resolve(this.client.loading_emote).users.remove(this.client.user);
             }
             catch (error) {
-                msg.replyFail(`Unable to remove reactions, am I missing permissions?\n${error}`);
+                return await msg.replyFail(`Unable to remove reactions, am I missing permissions?\n${error}`);
             }
         }   
 
@@ -333,12 +355,11 @@ export default class ChallengeCommand extends CompilerCommand {
         if (json.status == 0)
         {
             try {
-                responsemsg.react('🚫');
-                responsemsg.react('▶');
+                await responsemsg.react('🚫');
+                await responsemsg.react('▶');
             }
             catch (error) {
-                msg.replyFail(`Unable to react to message, am I missing permissions?\n${error}`);
-                return;
+                return await msg.replyFail(`Unable to react to message, am I missing permissions?\n${error}`);
             }
 
             // Succeeded! Give Experience points to the user.
@@ -349,24 +370,22 @@ export default class ChallengeCommand extends CompilerCommand {
             if (randomChallenge)
             {
                 try {
-                    responsemsg.react('🚫');
-                    responsemsg.react('🔁');
-                    responsemsg.react('▶');
+                    await responsemsg.react('🚫');
+                    await responsemsg.react('🔁');
+                    await responsemsg.react('▶');
                 }
                 catch (error) {
-                    msg.replyFail(`Unable to react to message, am I missing permissions?\n${error}`);
-                    return;
+                    return msg.replyFail(`Unable to react to message, am I missing permissions?\n${error}`);
                 }
             }
         }
-
         // Create a reaction collector
         const emojifilter = (reaction, user) => (reaction.emoji.name === '🚫' ||  reaction.emoji.name === '🔁' || reaction.emoji.name == '▶') && user.id === msg.message.author.id
         try
         {
             const collectionReactions = await responsemsg.awaitReactions(emojifilter, { max: 1, time: 30 * 1000 });
             const reaction = collectionReactions.first();
-            responsemsg.reactions.removeAll();
+            await responsemsg.reactions.removeAll();
 
             if (reaction.emoji.name == '🔁')
             {
@@ -387,6 +406,8 @@ export default class ChallengeCommand extends CompilerCommand {
             let embed = ChallengeCommand.buildResponseEmbed(msg, json, lang, true);
             responsemsg.edit('', embed);
         }
+        
+        return previousMessage;
     }
 
     /**

@@ -39,7 +39,6 @@ for (const key in languageFileTypes) {
         languageFileTypesReversed[extension].push(key);
     }
 }
-console.log(languageFileTypes, languageFileTypesReversed);
 
 function sleep(ms) {
     return new Promise((resolve) => {
@@ -237,7 +236,6 @@ export class ChallengeCatalog extends CompilationService {
         for (let challengeIndex = 0; challengeIndex < this.keyArray().length; challengeIndex++) {
             const challengeLevel = this.keyArray()[challengeIndex];
             challengeAmt += this.get(challengeLevel).length;
-            console.log(this.get(challengeLevel));
         }
         
         var templateFiles = getFilesInDirectory("templates");
