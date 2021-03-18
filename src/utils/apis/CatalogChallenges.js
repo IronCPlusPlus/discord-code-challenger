@@ -126,7 +126,7 @@ export class ChallengeCatalog extends CompilationService {
         }
         if (collectedInLanguage.length == 0)
             return null;
-        return collectedInLanguage[Math.random() * (collectedInLanguage.length - 1)];
+        return collectedInLanguage[Math.round(Math.random() * (collectedInLanguage.length - 1))];
     }
 
     async DownloadChallengesFromGithub()
@@ -237,6 +237,7 @@ export class ChallengeCatalog extends CompilationService {
         for (let challengeIndex = 0; challengeIndex < this.keyArray().length; challengeIndex++) {
             const challengeLevel = this.keyArray()[challengeIndex];
             challengeAmt += this.get(challengeLevel).length;
+            console.log(this.get(challengeLevel));
         }
         
         var templateFiles = getFilesInDirectory("templates");

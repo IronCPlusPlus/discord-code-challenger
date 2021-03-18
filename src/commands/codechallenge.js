@@ -50,7 +50,7 @@ export default class ChallengeCommand extends CompilerCommand {
             var lang = args[0].toLowerCase();
             if (lang == 'cpp') lang = 'c++'; // Save everyone the head-ache.
             args.shift();
-            const level = Number.isSafeInteger(args[0]) ? Number(args[0]) : undefined;
+            const level = Number.isSafeInteger(args[1]) ? Number(args[1]) : undefined;
     
             if (!this.client.wandbox.has(lang)) {
                 msg.replyFail(`You must input a valid language \n\n Usage: ${this.client.prefix}challenge <language>`);
@@ -83,7 +83,7 @@ export default class ChallengeCommand extends CompilerCommand {
     async LoadRandomQuestion(msg, previousMessage, level, lang)
     {
         if (level == undefined)
-            level = Math.round(Math.random() * this.client.challengeCatalog.keyArray().length);
+            level = Math.round(Math.random() * (this.client.challengeCatalog.keyArray().length - 1));
         
         var randomChallenge = this.client.challengeCatalog.getRandom(level, lang);
 
@@ -102,6 +102,8 @@ export default class ChallengeCommand extends CompilerCommand {
         }
 
         var decodedDescription = randomChallenge.description[lang];
+        if (decodedDescription == undefined)
+            decodedDescription = randomChallenge.description['*']
         if (decodedDescription == undefined)
         {
             if (previousMessage)
@@ -155,8 +157,16 @@ export default class ChallengeCommand extends CompilerCommand {
         var hintMessages = [];
 
         // Grabs the language or the all, if neither exist then there's no hints.
-        var hints = randomChallenge.hints == undefined ? undefined : randomChallenge.hints[lang].reverse();
-        hints = hints == undefined ? randomChallenge.hints['*'].reverse() : hints;
+        
+        var hints = undefined;
+        if (randomChallenge.hints != undefined)
+        {
+            hints = randomChallenge.hints[lang];
+            hints = hints == undefined ? randomChallenge.hints['*'] : hints;
+            if (hints != undefined)
+                hints = hints.reverse();
+        }
+
         var hintsLeft = hints == undefined ? 0 : hints.length;
 
         async function setupReactions()
