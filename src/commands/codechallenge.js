@@ -56,7 +56,9 @@ export default class ChallengeCommand extends CompilerCommand {
                 msg.replyFail(`You must input a valid language \n\n Usage: ${this.client.prefix}challenge <language>`);
                 return;
             }
-    
+            
+            await msg.message.delete();
+
             const embed = new MessageEmbed()
                 .setTitle('Finding Coding Challenge')
                 .setDescription(`*Searching Catalogs*`)
@@ -117,10 +119,20 @@ export default class ChallengeCommand extends CompilerCommand {
         decodedDescription = decodedDescription.replace(/(<([^>]+)>)/ig, "");
         decodedDescription = sanitizeHTML(decodedDescription);
 
+        var tags = "";
+        if (randomChallenge.tags != undefined)
+        {
+            for (let tagIndex = 0; tagIndex < randomChallenge.tags.length; tagIndex++) {
+                const tagElement = randomChallenge.tags[tagIndex];
+                tags += "`"+tagElement+"` ";
+            }
+        }
+
         const expirationTimeSecs = 5 * 60;
         const challengeEmbed = new MessageEmbed()
             .setTitle(randomChallenge.name)
             .addField("Language", lang)
+            .addField("Tags", tags)
             .addField("Level", randomChallenge.level + " ("+ randomChallenge.levelName +")")
             .addField("Instructions", decodedDescription)
             .addField("How to Answer?", "Next set of Input will take your answer! Remember to put code blocks around your code!")
@@ -138,32 +150,92 @@ export default class ChallengeCommand extends CompilerCommand {
             previousMessage = await msg.dispatch('', challengeEmbed);
         }
 
-        const filter = m => m.author.id === msg.message.author.id;
+        const reaction_filter = (reaction, user) => { return user.id === msg.message.author.id; };
+        
+        var hintMessages = [];
+
+        // Grabs the language or the all, if neither exist then there's no hints.
+        var hints = randomChallenge.hints == undefined ? undefined : randomChallenge.hints[lang].reverse();
+        hints = hints == undefined ? randomChallenge.hints['*'].reverse() : hints;
+        var hintsLeft = hints == undefined ? 0 : hints.length;
+
+        async function setupReactions()
+        {
+            if (hintsLeft > 0)
+            {
+                await previousMessage.react('❓');
+            }
+            await previousMessage.react('❌');
+            previousMessage.awaitReactions(reaction_filter, { max: 1, time: 1000 * expirationTimeSecs, errors: ['time'] })
+            .then(async collected => {
+                const reaction = collected.first();
+    
+                if (reaction.emoji.name === '❓') 
+                {
+                    var tmpHintMsg = await previousMessage.reply(hints[hintsLeft - 1]);
+                    hintMessages.push(tmpHintMsg);
+                    
+                    // Hint Used
+                    previousMessage.reactions.removeAll().catch(error => console.error('Failed to clear reactions: ', error));  
+
+                    hintsLeft--;
+                    
+                    // Update
+                    await setupReactions();
+    
+                } else if (reaction.emoji.name === '❌') {
+                    for (let index = 0; index < hintMessages.length; index++) {
+                        const hintMsg = hintMessages[index];
+                        hintMsg.delete();
+                    }
+                    await previousMessage.delete();
+                }
+            })
+            .catch(collected => {
+                previousMessage.reactions.removeAll().catch(error => console.error('Failed to clear reactions: ', error));
+            });
+        }
+        await setupReactions();
+
+        const code_filter = m => m.author.id === msg.message.author.id;
         var userAnswerMsgs = undefined;
         try
         {
-            userAnswerMsgs = await previousMessage.channel.awaitMessages(filter, { max: 1, time: 1000 * expirationTimeSecs, errors: ['time'] });
+            userAnswerMsgs = await previousMessage.channel.awaitMessages(code_filter, { max: 1, time: 1000 * expirationTimeSecs, errors: ['time', 'dispose'] });
         }
         catch (err)
         {
+            if (previousMessage.deleted)
+            {
+                return;
+            }
+
+            previousMessage.reactions.removeAll().catch(error => console.error('Failed to clear reactions: ', error));
             return await msg.replyFail('Question Timeout');
         }
 
+        if (previousMessage.deleted)
+        {
+            return;
+        }
+        
         const userAnswerMsg = userAnswerMsgs.first();
-        var userAnswer = userAnswerMsg.content;
-        var safeUserAnswer = userAnswer.endsWith('```') ? userAnswer.substring(0, userAnswer.length - 3) : userAnswer;
-
-        // User answer currently is used as the answer point to expected outputs;
-        // But soon...
-        // The User Answer should be a function/class that can be called upon and the expected outputs would run it's hidden tests on it.
-        // Essentially User never writes the int main() { return 0; } example for cpp.
-
+        var userAnswer = '' + userAnswerMsg.content;
+        var userAnswerStart = userAnswer.indexOf('\n');
+        
+        var safeUserAnswer = userAnswer.startsWith('```') ? userAnswer.substring( userAnswerStart, userAnswer.length) : userAnswer;
+        safeUserAnswer = safeUserAnswer.endsWith('```') ? safeUserAnswer.substring(0, safeUserAnswer.length - 3) : safeUserAnswer;
+        
         const languageExpectations = randomChallenge.expectedOutputs[lang];
 
-        userAnswerMsg.content = safeUserAnswer
-        +"\n\n// Generated Test Code\n"+
-        languageExpectations[0]
-        +"\n```";
+        const generatedCode = this.client.challengeCatalog.generateCode(safeUserAnswer, languageExpectations, lang);
+        if (generatedCode == undefined)
+        {
+            log.error('Failed to Generated User Code; `ASSERT('+thisline+') generatedCode == undefined`');
+            var thisline = new Error().lineNumber;
+            return await msg.replyFail('Failed to Generated User Code; `ASSERT('+thisline+') generatedCode == undefined`');
+        }
+        userAnswerMsg.content = "```" + generatedCode + "```";
         
         const tempCompilerMsg = new CompilerCommandMessage(userAnswerMsg);
         let parser = new CompilationParser(tempCompilerMsg);
@@ -176,7 +248,10 @@ export default class ChallengeCommand extends CompilerCommand {
                 code = await CompilationParser.getCodeFromURL(userAnswerMsg.attachments.first().url);
             }
             catch (e) {
-                return msg.replyFail(`Could not retrieve code from url \n ${e.message}`);
+                if (!previousMessage.deleted)
+                {
+                    return msg.replyFail(`Could not retrieve code from url \n ${e.message}`);
+                }
             }
         }
         // Standard ``` <code> ``` request
@@ -186,7 +261,10 @@ export default class ChallengeCommand extends CompilerCommand {
                 code = CompilationParser.cleanLanguageSpecifier(code);
             }
             else {
-                return msg.replyFail('You must attach codeblocks containing code to your message');
+                if (!previousMessage.deleted)
+                {
+                    return msg.replyFail('You must attach codeblocks containing code to your message');
+                }
             }
             /*
             const stdinblock = parser.getStdinBlockFromText();
@@ -273,7 +351,6 @@ export default class ChallengeCommand extends CompilerCommand {
         }
 
         // Create a reaction collector
-        console.log("Waiting for", msg.message.author.id);
         const emojifilter = (reaction, user) => (reaction.emoji.name === '🚫' ||  reaction.emoji.name === '🔁' || reaction.emoji.name == '▶') && user.id === msg.message.author.id
         try
         {
@@ -281,10 +358,8 @@ export default class ChallengeCommand extends CompilerCommand {
             const reaction = collectionReactions.first();
             responsemsg.reactions.removeAll();
 
-            console.log("Response from user", msg.message.author.id, reaction.emoji.name);
             if (reaction.emoji.name == '🔁')
             {
-                console.log("Restarting Question!");
                 await this.LoadQuestion(randomChallenge, msg, undefined, level, lang);
             }
             else if (reaction.emoji.name == '🚫')
@@ -293,7 +368,6 @@ export default class ChallengeCommand extends CompilerCommand {
             }
             else if (reaction.emoji.name == '▶')
             {
-                console.log("Starting new Random Question!");
                 await this.LoadRandomQuestion(msg, undefined, level, lang);
             }
         }

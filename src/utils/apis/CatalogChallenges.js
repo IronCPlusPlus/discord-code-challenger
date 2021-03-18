@@ -23,6 +23,24 @@ const isFile = source => !fs.lstatSync(source).isDirectory();
 const getDirectories = source => fs.readdirSync(source).map(name => path.join(source, name)).filter(isDirectory);
 const getFilesInDirectory = source => fs.readdirSync(source).map(name => path.join(source, name)).filter(isFile);
 
+const languageFileTypes = {
+    'c++' : ['cpp'],
+    'cpp' : ['cpp'],
+    'javascript' : ['js'],
+}
+const languageFileTypesReversed = {}
+for (const key in languageFileTypes) {
+    const element = languageFileTypes[key];
+
+    for (let index = 0; index < element.length; index++) {
+        const extension = element[index];
+        if (languageFileTypesReversed[extension] == undefined)
+            languageFileTypesReversed[extension] = [];
+        languageFileTypesReversed[extension].push(key);
+    }
+}
+console.log(languageFileTypes, languageFileTypesReversed);
+
 function sleep(ms) {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
@@ -44,6 +62,7 @@ export class ChallengeCatalog extends CompilationService {
     constructor(client) {
         super(client);
         this.difficultLevels = difficultLevels;
+        this.templates = {};
     }
     
     /**
@@ -58,7 +77,29 @@ export class ChallengeCatalog extends CompilationService {
 
     /**
      * 
+     * @param {String} userCode 
+     * @param {String} lang 
+     * @return {String}
+     */
+    generateCode(userCode, tests, language)
+    {
+        if (languageFileTypes[language] == undefined)
+        {
+            log.error("Langauge `" + language + "` not supported for Generating Code!");
+            return null;
+        }
+
+        var template = '' + this.templates[language];
+        template = template.replace('{__TESTS__}', tests.join(" && "));
+        template = template.replace('{__USERGEN__}', userCode);
+
+        return template;
+    }
+
+    /**
+     * 
      * @param {Number} level 
+     * @param {String} language 
      * @return {Challenge}
      */
     getRandom(level, language)
@@ -150,7 +191,7 @@ export class ChallengeCatalog extends CompilationService {
         if (!this.has(level))
             this.set(level, []);
         
-        this.get(level).push(new Challenge(challengeJson.title, challengeJson.tags, Object.keys(challengeJson.tests), level, challengeJson.difficulty, challengeJson.instructions, challengeJson.tests));
+        this.get(level).push(new Challenge(challengeJson.title, challengeJson.tags, Object.keys(challengeJson.tests), level, challengeJson.difficulty, challengeJson.instructions, challengeJson.tests, challengeJson.hints));
     }
 
     async LoadChallenges(path)
@@ -197,6 +238,22 @@ export class ChallengeCatalog extends CompilationService {
             const challengeLevel = this.keyArray()[challengeIndex];
             challengeAmt += this.get(challengeLevel).length;
         }
+        
+        var templateFiles = getFilesInDirectory("templates");
+        for (let fileIndex = 0; fileIndex < templateFiles.length; fileIndex++) {
+            const file = templateFiles[fileIndex];
+            var extension = file.split('.')
+            extension = extension[extension.length - 1];
+            
+            const languageExtensions = languageFileTypesReversed[extension];
+            if (languageExtensions == undefined)
+                continue;
+
+            for (let index = 0; index < languageExtensions.length; index++) {
+                const language = languageExtensions[index];
+                this.templates[language] = fs.readFileSync(file).toString('utf-8');
+            }
+        }
 
         log.info("Loaded : " + this.keyArray().length + " Challenge Levels");
         log.info("Loaded : " + challengeAmt + " Challenges");
@@ -209,7 +266,7 @@ export class ChallengeCatalog extends CompilationService {
 
 export class Challenge
 {
-    constructor(name, tags, languages, level, levelName, description, expectedOutputs, caseSensitive)
+    constructor(name, tags, languages, level, levelName, description, expectedOutputs, hints, caseSensitive)
     {
         this.name = name;
         this.tags = tags;
@@ -218,6 +275,7 @@ export class Challenge
         this.levelName = levelName;
         this.description = description;
         this.expectedOutputs = expectedOutputs;
+        this.hints = hints;
         this.caseSensitive = (caseSensitive == undefined ? true : false); // default is true.
     }
 }
